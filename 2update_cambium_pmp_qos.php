@@ -23,7 +23,7 @@ include realpath(COMMON_PHP_DIR . '/deleteOldLogs.php');
 ///////////////////////////////////////////////// GLOBALS /////////////////////////////////////////////
 
 $logging_on = 1;
-$f_name = pathinfo(__FILE__)['basename'];
+$file_name = 'update_cambium_pmp_qos.php';
 $log_dir = __DIR__ . '/log_cambium_pmp/';
 $keep_logs_days_old = 90;
 $sf_url = 'https://na131.salesforce.com/';
