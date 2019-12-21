@@ -1,25 +1,24 @@
 <?php
 
 
-function sf_update($id,$dn,$up,$ovrd) {
+function sf_opp_update($id,$dn,$up,$ovrd) {
 /*
-id = salesforce opportunity id; 
-dn = download in mbps; 
-up = upload in mbps; 
+id = salesforce opportunity id;
+dn = download in mbps;
+up = upload in mbps;
 ovrd = value to put in Radio_MIR_Override__c
-requires USERNAME and PASSWORD to be set and SforceEnterpriseClient.php to be loaded from the php Salesforce toolkit
+requires SF_USER and SF_PW to be set and SforceEnterpriseClient.php to be loaded from the php Salesforce toolkit
 */
   $sf_dn = ($dn / 1024);
   $sf_up = ($up / 1024);
-  $wsdl = COMMON_PHP_DIR . '/wsdl/production.enterprise.wsdl.xml';
   $mySforceConnection = new SforceEnterpriseClient();
-  $mySoapClient = $mySforceConnection->createConnection($wsdl);
+  $mySoapClient = $mySforceConnection->createConnection(WSDL);
   $mylogin = $mySforceConnection->login(SF_USER,SF_PW);
-  //$options = new QueryOptions(300);  //Set query to return results in chunks
-  $mySforceConnection->setQueryOptions($options);
-  $obj = 'Opportunity'; // salesforce object to query
+
+  $obj = 'Opportunity'; // salesforce object to update
   $data = [$id,$sf_dn,$sf_up,$ovrd]; //the number of data and number of fields must match
   $fields = 'Id,Radio_MIR_Down__c,Radio_MIR_Up__c,Radio_MIR_Override__c';
+
   $fields_arr = explode(",",$fields);
   $fields_ct = count($fields_arr);
   $obj_arr = [];
@@ -29,8 +28,24 @@ requires USERNAME and PASSWORD to be set and SforceEnterpriseClient.php to be lo
   $sObject = (object) $obj_arr;
                                                                                         //writelog("\n");
                                                                                         //writelog($sObject);
-  $createResponse = $mySforceConnection->update(array($sObject), 'Opportunity');
+  $createResponse = $mySforceConnection->update(array($sObject), $obj);
   return $createResponse[0]->success;
 }
 
+
+function sf_create_case_comment($case_id,$msg) {
+/*
+case_id = Case id;
+msg = message to put in comment
+requires SF_USER and SF_PW to be set and SforceEnterpriseClient.php to be loaded from the php Salesforce toolkit
+*/
+  $mySforceConnection = new SforceEnterpriseClient();
+  $mySoapClient = $mySforceConnection->createConnection(WSDL);
+  $mylogin = $mySforceConnection->login(SF_USER,SF_PW);
+  $sObject = new stdClass();
+  $sObject->ParentId = $case_id;
+  $sObject->CommentBody = $msg;
+  $createResponse = $mySforceConnection->create(array($sObject), 'CaseComment');
+  return $createResponse;//[0]->success;
+}
 

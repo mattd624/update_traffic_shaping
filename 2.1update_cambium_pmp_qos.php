@@ -17,7 +17,7 @@ require realpath(COMMON_PHP_DIR . '/parseNotification.php');
 include realpath(COMMON_PHP_DIR . '/writelog.php');
 include realpath(COMMON_PHP_DIR . '/deleteOldLogs.php');
 include realpath(COMMON_PHP_DIR . '/logTime.php');
-require realpath(__DIR__ . '/sf_update.php');
+require realpath(__DIR__ . '/2sf_update.php');
 require realpath(__DIR__ . '/ping_port.php');
 require realpath(__DIR__ . '/data_same.php');
 
@@ -29,7 +29,7 @@ $f_name = pathinfo(__FILE__)['basename'];
 $f_dir = pathinfo(__FILE__)['dirname'];
 $log_dir = '/2log_cambium_pmp/';
 $keep_logs_days_old = 90;
-$sf_url = 'https://na131.salesforce.com/';
+$sf_url = 'https://na131.salesforce.com';
 
 ///////////////////////////////////////////////  FUNCTIONS  ///////////////////////////////////////////
 
@@ -139,8 +139,8 @@ try {
       \n\nHere is the object:\n";
                                                                                         writelog($msg);
                                                                                         writelog($sf_obj);
-                                                                                        sf_create_case_comment($id,$msg);
-                                                                                        sf_create_case_comment($id,$sf_obj);
+                                                                                        $sf_case_comment_arr[] = sf_case_comment($id,$msg);
+                                                                                        $sf_case_comment_arr[] = sf_case_comment($id,$sf_obj);
     } else {
       
       $sf_obj_arr[$id] = $sf_obj;
@@ -178,7 +178,7 @@ writelog($sf_data);
                                                                                         writelog("\n$msg");
                                                                                         slack($msg,'mattd');
       $msg = "Invalid IP address: \"$ip\"";
-                                                                                        sf_create_case_comment($id,$msg);
+                                                                                        $sf_case_comment_arr[] = sf_case_comment($id,$msg);
       continue;
     }
 
@@ -199,7 +199,7 @@ writelog($sf_data);
       $msg = "$f_name: $sf_url$id - $ip - Ping check failed";
                                                                                         writelog("\n$msg");
                                                                                         slack($msg, 'mattd');
-                                                                                        sf_create_case_comment($id,$msg);
+                                                                                        $sf_case_comment_arr[] = sf_case_comment($id,$msg);
       continue;
     }
     $radio_model_str = get_snmp_data($ip, $pmp_radio_model_oid);
@@ -208,7 +208,7 @@ writelog($sf_data);
       $msg = "$radio_model_str is not the correct type of radio for this script.";
                                                                                         writelog("\n$msg");
                                                                                         slack($msg, 'mattd');
-                                                                                        sf_create_case_comment($id,$msg);
+                                                                                        $sf_case_comment_arr[] = sf_case_comment($id,$msg);
       continue;
     }
     $snmp_max = get_snmp_data($ip, $qos_max_oid);
@@ -225,7 +225,7 @@ writelog($sf_data);
       $msg = "$f_name: $sf_url$id - $ip - Data is the same; no need to update";
                                                                                         writelog("\n$msg");
                                                                                         slack($msg, 'mattd');
-                                                                                        sf_create_case_comment($id,$msg);
+                                                                                        $sf_case_comment_arr[] = sf_case_comment($id,$msg);
       $individual_success['successful']++;
     } else { 
       set_snmp_val($ip, $qos_dn_write_oid , $sf_data->sf_dn);
@@ -254,29 +254,32 @@ writelog($sf_data);
         $snmp_followup_read_data['down']['rate'] = get_snmp_data($ip,$qos_dn_read_oid);
         $snmp_followup_read_data['up']['rate'] = get_snmp_data($ip,$qos_up_read_oid);
         $snmp_followup_read_data['ovrd'] = determine_ovrd($snmp_followup_read_data);
+
+        //////////check new data against sf data and if good, callback to sf and update values
+        $sf_opp_radio_mir_arr = [];
+        $sf_case_comment_arr = [];
         if (data_same($sf_data,$snmp_followup_read_data)) {
-          $individual_success['successful']++;
-          $sf_opp_update_success = sf_opp_update($opp_id,$snmp_followup_read_data['down']['rate'],$snmp_followup_read_data['up']['rate'],$snmp_followup_read_data['ovrd']);
+
+          $sf_opp_radio_mir_arr[] = sf_radio_mir($opp_id,$snmp_followup_read_data['down']['rate'],$snmp_followup_read_data['up']['rate'],$snmp_followup_read_data['ovrd']);
+
           if ($snmp_followup_read_data['ovrd']) $friendly_ovrd = 'active';
-          else $friendly_ovrd = 'off';
+          else $friendly_ovrd = 'not active';
           $new_ssh_dn_Mbps = ($snmp_followup_read_data['down']['rate'] / 1024);
           $new_ssh_up_Mbps = ($snmp_followup_read_data['up']['rate'] / 1024);
           $msg = "Download updated to $new_ssh_dn_Mbps Mbps. Upload updated to $new_ssh_up_Mbps Mbps. Radio override is $friendly_ovrd.";
-          $sf_create_case_comment_success = sf_create_case_comment($id,$msg);
-          if(!$sf_opp_update_success and $sf_create_case_comment_success) {
-            $msg = "$f_name: $sf_url$id - $ip - update success, but sf_update failed.";
-                                                                                        writelog("\n$msg");
-                                                                                        slack($msg, 'mattd');
-          }
+                                                                                        $sf_case_comment_arr[] = sf_case_comment($id,$msg);
+          $individual_success['successful']++;
         } else {
           $msg = "$f_name: $sf_url$id - $ip - update failed. Data is not as intended after update";
                                                                                         writelog("\n$msg");
                                                                                         slack($msg, 'mattd');
+                                                                                        $sf_case_comment_arr[] = sf_case_comment($id,$msg);
         }
       } else {
         $msg = "$f_name: $sf_url$id - $ip - update failed. Data is not as intended after reboot";
                                                                                         writelog("\n$msg");
                                                                                         slack($msg, 'mattd');
+                                                                                        $sf_case_comment_arr[] = sf_case_comment($id,$msg);
       }
       error_reporting(E_ALL);
     }
@@ -286,7 +289,7 @@ writelog($sf_data);
 } catch (exception $e) {
   $catch_msg = "$f_name: $sf_url$id - $ip - Caught exception: $e";
                                                                                         slack($catch_msg, 'mattd');
-                                                                                        sf_create_case_comment($id,$catch_msg);
+                                                                                        $sf_case_comment_arr[] = sf_case_comment($id,$catch_msg);
   $individual_success['successful'] = 0;
 }
                                                                                         writelog("\n\n Success: ");
@@ -299,8 +302,22 @@ if ($individual_success['successful'] == $individual_success['total']) {
   $msg = "$f_name: $sf_url$id - $ip - failed";
                                                                                         writelog($msg);
                                                                                         slack($msg, 'mattd');
-                                                                                        sf_create_case_comment($id,$msg);
+                                                                                        $sf_case_comment_arr[] = sf_case_comment($id,$msg);
 }
+
+try {
+  $mySforceConnection = new SforceEnterpriseClient();
+  $mySoapClient = $mySforceConnection->createConnection(WSDL);
+  $mylogin = $mySforceConnection->login(SF_USER,SF_PW);
+  $createResponse = $mySforceConnection->update($sf_opp_radio_mir_arr, 'Opportunity');
+  $createResponse = $mySforceConnection->create($sf_case_comment_arr, 'CaseComment');
+} catch (Exception $e) {
+  $msg = "Error creating/updating SF Object(s): $e->faultstring";
+                                                                                        writelog("\n$msg");
+                                                                                        slack("$rel_path - $msg",'mattd');
+}
+
+
 respond('true');
                                                                                         log_time();
                                                                                         writelog("\nEND");
