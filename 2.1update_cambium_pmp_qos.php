@@ -266,7 +266,8 @@ writelog($sf_data);
           else $friendly_ovrd = 'not active';
           $new_ssh_dn_Mbps = ($snmp_followup_read_data['down']['rate'] / 1024);
           $new_ssh_up_Mbps = ($snmp_followup_read_data['up']['rate'] / 1024);
-          $msg = "Download updated to $new_ssh_dn_Mbps Mbps. Upload updated to $new_ssh_up_Mbps Mbps. Radio override is $friendly_ovrd.";
+          $msg = "Download updated from " . $snmp_data['down']['rate'] . " to $new_ssh_dn_Mbps Mbps. Upload updated from " . 
+              $snmp_data['up']['rate'] . " to $new_ssh_up_Mbps Mbps. Radio override is $friendly_ovrd.";
                                                                                         $sf_case_comment_arr[] = sf_case_comment($id,$msg);
           $individual_success['successful']++;
         } else {
