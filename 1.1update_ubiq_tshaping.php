@@ -30,6 +30,7 @@ $f_name = pathinfo(__FILE__)['basename'];
 $log_dir = __DIR__ . '/1log_ubiq/';
 $keep_logs_days_old = 90;
 $sf_url = 'https://na131.salesforce.com/';
+$rel_path = substr(__FILE__, strlen($_SERVER['DOCUMENT_ROOT']));
 
 
 ///////////////////////////////////////////////  FUNCTIONS  ///////////////////////////////////////////
@@ -225,9 +226,7 @@ function ssh_update($ip,$sf_data, $ssh_data, $tshaper_str) {
   }
 }
 
-
-function $sf_case_comment_arr[] = sf_case_comment($case_id,$msg) {
-
+/*
 case_id = Case id;
 msg = message to put in comment
 requires USERNAME and PASSWORD to be set and SforceEnterpriseClient.php to be loaded from the php Salesforce toolkit
@@ -295,7 +294,7 @@ $org_id = $requestArray['OrganizationId'];
 $org_id_success = checkOrgID($org_id);
 if (!$org_id_success) {
                                                                                         writelog("\nOrg ID check failed. Exiting.");
-                                                                                        slack("$f_name: Org ID check failed",'mattd');
+                                                                                        slack("$rel_path: Org ID check failed",'mattd');
   respond('true');
   exit;
 } 
@@ -303,6 +302,9 @@ if (!$org_id_success) {
 //  exit;
 try {
   $sf_obj_arr = [];
+  $individual_success = [];
+  $individual_success['total'] = count($requestArray['MapsRecords']);
+  $individual_success['successful'] = 0;
   foreach ($requestArray['MapsRecords'] as $r) {
 writelog("\n");
 writelog($r);
@@ -326,6 +328,7 @@ writelog($r);
                                                                                         writelog($sf_obj);
                                                                                         $sf_case_comment_arr[] = sf_case_comment($id,$msg);
                                                                                         $sf_case_comment_arr[] = sf_case_comment($id,$sf_obj);
+    continue;
     } else {
       $sf_obj_arr[$id] = $sf_obj;
       $sf_obj_arr[$id]->sf_dn = round($sf_obj->MIR_Down__c * 1024);
@@ -337,9 +340,8 @@ writelog($r);
       }
     }
   }
-  $individual_success = [];
-  $individual_success['total'] = count($requestArray['MapsRecords']);
-  $individual_success['successful'] = 0;
+
+
   foreach ($sf_obj_arr as $sf_data) {
     $id = $sf_data->Id;
     preg_match('/.*?([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}).*/',$sf_data->SU_IP_Address__c, $match);
@@ -349,7 +351,7 @@ writelog($r);
 /////// check IP address validity
     $ip_is_valid = filter_var($ip, FILTER_VALIDATE_IP);
     if (!$ip_is_valid) {
-      $msg = "$f_name: $sf_url$id - Invalid IP address: \"$ip\"";
+      $msg = "$rel_path: $sf_url$id - Invalid IP address: \"$ip\"";
                                                                                         writelog("\n$msg");
                                                                                         slack($msg,'mattd');
       $msg = "Invalid IP address: \"$ip\"";
@@ -378,11 +380,10 @@ writelog($r);
                                                                                         writelog("success");
           } else {
                                                                                         writelog("\n\nNO FOLLOWUP DATA");
-            $msg = "$f_name: " . $sf_url . $id . " - NO FOLLOWUP DATA";
+            $msg = "$rel_path: " . $sf_url . $id . " - NO FOLLOWUP DATA";
                                                                                         slack($msg, 'mattd');
             continue;
           }
-          unset($ssh_parsed_data);
           $ssh_parsed_followup_data = parse_ssh_data($ssh_followup_data);
           unset($ssh_followup_data);
           $new_ssh_ovrd = $ssh_parsed_followup_data['ovrd'];
@@ -393,7 +394,7 @@ writelog($r);
                                                                                         writelog("\n  new_ssh_up: $new_ssh_up");
         } else {
                                                                                         writelog("\nSSH UPDATE FAILED");
-          $msg = "$f_name: " . $sf_url . $id . " - SSH UPDATE FAILED";
+          $msg = "$rel_path: " . $sf_url . $id . " - SSH UPDATE FAILED";
                                                                                         slack($msg, 'mattd'); 
           continue;
         }
@@ -407,16 +408,21 @@ writelog($r);
           if ($new_ssh_ovrd) $friendly_ovrd = 'active';
           else $friendly_ovrd = 'not active';
           
-          $new_ssh_dn_Mbps = ($new_ssh_dn / 1024);
-          $new_ssh_up_Mbps = ($new_ssh_up / 1024);
-          $msg = "Download updated to $new_ssh_dn_Mbps Mbps. Upload updated to $new_ssh_up_Mbps Mbps. Radio override is $friendly_ovrd.";
+          $old_ssh_dn_Mbps = round(($ssh_parsed_data['down']['rate'] / 1024),2);
+          $old_ssh_up_Mbps = round(($ssh_parsed_data['up']['rate'] / 1024),2);
+          $new_ssh_dn_Mbps = round(($new_ssh_dn / 1024),2);
+          $new_ssh_up_Mbps = round(($new_ssh_up / 1024),2);
+          $msg = "Download updated from $old_ssh_dn_Mbps to $new_ssh_dn_Mbps Mbps.\n".
+                 "Upload updated from $old_ssh_up_Mbps to $new_ssh_up_Mbps Mbps.\n".
+                 "Radio override is $friendly_ovrd.";
                                                                                         $sf_case_comment_arr[] = sf_case_comment($id,$msg);
           $individual_success['successful']++;
         } else {
-          $msg = "$f_name: " . $sf_url . $id . " - SU UPDATE FAILED - data is not the same after update";
+          $msg = "$rel_path: " . $sf_url . $id . " - SU UPDATE FAILED - data is not the same after update";
                                                                                         writelog("\n$msg");
                                                                                         slack($msg,'mattd');
                                                                                         $sf_case_comment_arr[] = sf_case_comment($id,$msg);
+          continue;
         }
       } else {
         $msg = "\n$sf_url/$id : $ip : Data is the same. Nothing to change.";
@@ -426,13 +432,14 @@ writelog($r);
         $individual_success['successful']++;
       } 
     } else {
-        $msg = "$sf_url/$id : $ip : unable to get ssh data";
+      $msg = "$sf_url/$id : $ip : unable to get ssh data";
                                                                                         writelog("\n$msg");
                                                                                         $sf_case_comment_arr[] = sf_case_comment($id,$msg);
+      continue;  
     }
   }//end of for loop: ($sf_obj_arr as $sf_data)
 } catch (exception $e) {
-  $catch_msg = "$f_name: " . $sf_url . $id . " - Caught exception: $e";
+  $catch_msg = "$rel_path: " . $sf_url . $id . " - Caught exception: $e";
                                                                                         slack($catch_msg, 'mattd');
                                                                                         $sf_case_comment_arr[] = sf_case_comment($id,$catch_msg);
   $individual_success['successful'] = 0; 
@@ -443,7 +450,7 @@ writelog($r);
                                                                                         "\n");
 ob_get_clean();
 if (!($individual_success['successful'] == $individual_success['total'])) {
-  $msg = "$f_name: " . $sf_url . $id . " - failed";
+  $msg = "$rel_path: " . $sf_url . $id . " - failed";
                                                                                         writelog($msg);
                                                                                         slack($msg, 'mattd');
                                                                                         $sf_case_comment_arr[] = sf_case_comment($id,$msg);
