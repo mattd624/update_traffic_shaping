@@ -1,326 +1,209 @@
 <?php
 /////////////////////////////////////////// Includes //////////////////////////////////////////////
 
-
-ini_set("soap.wsdl_cache_enabled", "0");  // clean WSDL for develop
-ini_set("allow_url_fopen", true);
-date_default_timezone_set('America/Los_Angeles');
-require realpath(__DIR__ . '/../commonDirLocation.php');
-require (COMMON_PHP_DIR . '/toolkit/soapclient/SforceEnterpriseClient.php');
-require (COMMON_PHP_DIR . '/partial.userAuth.php'); //this contains the credentials used to log into our org when the API is called
-require realpath(COMMON_PHP_DIR . '/creds.php');
-require realpath(COMMON_PHP_DIR . '/SlackMessagePost.php');
-require realpath(COMMON_PHP_DIR . '/checkOrgID.php');
-require realpath(COMMON_PHP_DIR . '/respond.php');
-require realpath(COMMON_PHP_DIR . '/snmp.php');
-require realpath(COMMON_PHP_DIR . '/parseNotification.php');
-require realpath(__DIR__ . '/sf_update.php');
-require realpath(__DIR__ . '/ping_port.php');
-include realpath(COMMON_PHP_DIR . '/deleteOldLogs.php');
-
+require_once (__DIR__ . '/maestro_api.php');
+require_once (__DIR__ . '/epmp_profiles.php');
 
 ///////////////////////////////////////////////// GLOBALS /////////////////////////////////////////////
 
-$logging_on = 1;
-$file_name = 'update_cambium_pmp_qos.php';
-$log_dir = __DIR__ . '/log_cambium_pmp/';
-$keep_logs_days_old = 90;
-$sf_url = 'https://na131.salesforce.com/';
+
 
 ///////////////////////////////////////////////  FUNCTIONS  ///////////////////////////////////////////
 
 
-
-function writelog($log) {
-    global $log_dir;
-    global $logging_on;
-    if ($logging_on) {
-      file_put_contents($log_dir . @date('Y-m-d') . '.log', print_r($log, true), FILE_APPEND);
-    }
+function determine_ovrd($snmp_data) {
+  if (($snmp_data['up']['rate'] + $snmp_data['down']['rate']) > 1000000) return 1;
+    else return 0;
 }
 
-
-function log_time() {
-  /////////////..........depends on writelog()
-  $tmstmp = date('D, \d\a\y d \o\f F, G:i:s');
-  writelog("\n" . $tmstmp . "\n\n\n");
-}
-
-
-function send_reboot_cmd($ip) {
-  $success = 0;
-  $success1 = set_snmp_val($ip, '.1.3.6.1.4.1.17713.21.4.3.0', $value = 1); ///save
-  $success2 = set_snmp_val($ip, '.1.3.6.1.4.1.17713.21.4.1.0', $value = 1); ///reboot
-  if ($success1 + $success2 == 2) $success = 1;
-  return $success;
-}
-
-
-function determine_ovrd(array $snmp_data) {
-  global $max_profile_num;
-  if ($snmp_data['profile_num'] == $max_profile_num) {
-    return 1;
-  }
-  return 0;
-}
-
-
+/*
 function data_same($sf_data, $remote_data) {
-  if (($sf_data['profile_num'] == $remote_data['profile_num']) and
-      ($sf_data['ovrd'] == $remote_data['ovrd'])) {
+  if (($sf_data->profile->num == $remote_data->profile->num) and
+      ($sf_data->ovrd == $remote_data->ovrd)) {
     return 1;
   } else {
     return 0;
   }
 }
-
-
-function determine_profile_num($sf_data) {
-  $profile_table = [
-    '' => '1',
-    '' => '2',
-    '' => '3',
-    '' => '4',
-    '' => '5',
-    '' => '6',
-    '' => '7',
-    '' => '8',
-    '' => '9',
-    '' => '10',
-    '' => '11',
-    '' => '12',
-    '' => '13',
-    '' => '14',
-    '' => '15'
-  ];  
-  return $profile_table[$sf_data->Plan__c];
-}
-///////////////////////////////////////////////// START EXECUTION CODE ///////////////////////////////////////////
-
-
-                                                                                        writelog(
-                                                                                          "\n\n\n________________________________________________________________________\n" .
-                                                                                          "________________________________________________________________________\n"
-                                                                                        );
-
-                                                                                        log_time();
-
-ob_start();
-
-$req = file_get_contents('php://input');
-if (empty($req)) {
-                                                                                        writelog("\n\nRequest is empty. Responding true and exiting...");
-  respond('true');
-  exit;
-}
-
-//                                                                                      writelog("\n\nREQ:\n\n");
-//                                                                                      writelog($req);
-$xml = new DOMDocument();
-$xml->loadXML($req);
-$requestArray = parseNotification($xml);
-//                                                                                      writelog("\n\nREQ ARRAY:\n\n");
-//                                                                                      writelog($requestArray);
-/*
-//Test Array:
-$requestArray = array(
-  'OrganizationId' => '00DU0000000IjIFMA0',
-  'MapsRecords' => array(
-    0 => array(
-        'Id' => '000kjh00000000023423',
-        'Name' => 'A-S01040799',
-        'SU_IP_Address__c' => '10.11.205.4',
-        'AP_Standard_Name__c' => 'flbk-su-test_1',
-        'MIR_Down_Mbps__c' => '57.000',
-        'MIR_Up_Mbps__c' => '57.000',
-        'Remove_PSM_Rate_Limiting__c' => 'false'
-    ),
-
-    1 => array(
-        'Id' => '000kjh00000000023424',
-        'Name' => 'A-S01040800',
-        'SU_IP_Address__c' => '192.168.2.46',
-        'AP_Standard_Name__c' => 'flbk-su-test_2',
-        'MIR_Down_Mbps__c' => '7.3',
-        'MIR_Up_Mbps__c' => '4.0',
-        'Remove_PSM_Rate_Limiting__c' => 'true'
-    ),
-
-    2 => array(
-        'Id' => '000kjh00000000023425',
-        'Name' => 'A-S01040801',
-        'SU_IP_Address__c' => '192.168.2.47',
-        'AP_Standard_Name__c' => 'flbk-su-test_3',
-        'MIR_Down_Mbps__c' => '20.000',
-        'MIR_Up_Mbps__c' => '6.50284809',
-        'Remove_PSM_Rate_Limiting__c' => 'false'
-    ),
-
-    3 => array(
-        'Id' => '000kjh00000000023426',
-        'Name' => 'A-S01040802',
-        'SU_IP_Address__c' => '192.168.2.48',
-        'AP_Standard_Name__c' => 'flbk-su-test_4',
-        'MIR_Down_Mbps__c' => '24.000',
-        'MIR_Up_Mbps__c' => '6.50',
-        'Remove_PSM_Rate_Limiting__c' => 'false'
-    )
-
-  ),
-  'sObject' => '0'
-);
 */
-
-$org_id = $requestArray['OrganizationId'];
-$org_id_success = checkOrgID($org_id);
-if (!$org_id_success) {
-                                                                                        writelog("\nOrg ID check failed. Exiting.");
-                                                                                        slack($file_name . ": Org ID check failed",'mattd');
-  respond('true');
-  exit;
-}
-
-//  respond('true');
-//  exit;
-
-
-try {
-  $sf_obj_arr = [];
-  foreach ($requestArray['MapsRecords'] as $r) {
-    $id = $r['Id'];
-    $sf_obj = (object) $r;
-    $sf_obj->modify_flag = 0;
-    if (
-        !isset($sf_obj->SU_IP_Address__c) ||
-        !isset($sf_obj->MIR_Down_Mbps__c) ||
-        !isset($sf_obj->MIR_Up_Mbps__c) ||
-        !isset($sf_obj->Remove_PSM_Rate_Limiting__c)
-       ) {
-                                                                                        slack("\n$sf_url$id has a required value MISSING", 'mattd');
-                                                                                        writelog("\n$sf_url$id has a required value MISSING:");
-                                                                                        writelog("\nsf_obj->SU_IP_Address__c: " . $sf_obj->SU_IP_Address__c);
-                                                                                        writelog("\nsf_obj->MIR_Down_Mbps__c: " . $sf_obj->MIR_Down_Mbps__c );
-                                                                                        writelog("\nsf_obj->MIR_Up_Mbps__c: " . $sf_obj->MIR_Up_Mbps__c );
-                                                                                        writelog("\nHere is the object:\n");
-                                                                                        writelog($sf_obj);
-    } else {
-      $sf_obj_arr[$id] = $sf_obj;
-      $sf_obj_arr[$id]->sf_dn = round($sf_obj->MIR_Down_Mbps__c * 1000);
-      $sf_obj_arr[$id]->sf_up = round($sf_obj->MIR_Up_Mbps__c * 1000);
-      if ($sf_obj->Remove_PSM_Rate_Limiting__c == 'true') {
-        $sf_obj_arr[$id]->sf_ovrd = 1;
-      } else {
-        $sf_obj_arr[$id]->sf_ovrd = 0;
-      }
-    }
+/*
+function get_profile($num) {
+  global $profiles;
+  foreach ($profiles as $type) {
+    if (isset($type[$num])) return $type[$num];
   }
-
-  $individual_success = [];
-  $individual_success['total'] = count($requestArray['MapsRecords']);
-  $individual_success['successful'] = 0;
-  foreach ($sf_obj_arr as $sf_data) {
-    $id = $sf_data->Id;
-    $ip = $sf_data->SU_IP_Address__c;
-                                               writelog("\n________________________________________________________________________\n\nWorking IP: $ip\nid: $id");
-    $ip_is_valid = filter_var($ip, FILTER_VALIDATE_IP);
-    if (!$ip_is_valid) {
-      $msg = $file_name . ": " . $sf_url . $id . " - " . $ip . " is not a valid IP address";
-                                                                                        writelog("\n$msg");
-                                                                                        slack($msg,'mattd');
-      continue;
-    }
-
-                                                                                        writelog("\nsf_ovrd: $sf_data->sf_ovrd");
-                                                                                        writelog("\nsf_dn: $sf_data->sf_dn");
-                                                                                        writelog("\nsf_up: $sf_data->sf_up");
+  return 0;
+}
+*/
 /*
-    $qos_max_oid    =   '.1.3.6.1.4.1.161.19.3.3.1.108.0';
-    $qos_dn_read_oid =  '.1.3.6.1.4.1.161.19.3.2.2.99.0'; 
-    $qos_up_read_oid =  '.1.3.6.1.4.1.161.19.3.2.2.97.0';
-    $qos_dn_write_oid = '.1.3.6.1.4.1.161.19.3.2.1.64.0';
-    $qos_up_write_oid = '.1.3.6.1.4.1.161.19.3.2.1.62.0';
+function determine_profile($sf_data) {
+  global $profiles;
+
+  if ($sf_data->ovrd == 1) return $profiles['default'][0];
+
+  $type = ($sf_data->sf_dn === $sf_data->sf_up) ? 'symm' : 'asym';
+
+  foreach ($profiles[$type] as $i => $profile) {
+    $previous = isset($profiles[$type][$i -1]) ? $profiles[$type][$i -1]->dn : 0;
+    $current = $profile->dn;
+    if (($previous < $sf_data->sf_dn) and ($sf_data->sf_dn <= $current)) return $profile;
+  }
+  return $profiles['default'][0];
+}
 */
 
-    $qos_profile_oid =  '.1.3.6.1.4.1.17713.21.3.8.2.30.0'; 
-    
-    
-    $ping_check = get_snmp_data($ip, '.1.3.6.1.2.1.1.1.0'); 
-    if (!$ping_check) {
-      $msg = $file_name . ": " . $sf_url . $id . " - " . $ip . "Ping check failed";
-                                                                                        writelog("\n$msg");
-                                                                                        slack($msg, 'mattd');
-      continue;
-    }
+function do_ePMP($sf_data) {
+  global $max_profile_num;
+  global $individual_success;
+  global $sf_case_comment_arr;
+  global $sf_opp_radio_mir_arr;
+  global $rel_path;
+  global $sf_url;
+  global $product_type;
+  $product_type = 'ePMP';
+  $max_profile_num = 0;
+
+  $id = $sf_data->Id;
+  $opp_id = $sf_data->Opportunity__c;
+  $ip = $sf_data->SU_IP_Address__c;
+  $last_mod_id = $sf_data->LastModifiedById;
+  try {
+                                                                                        heavylog("GETTING SNMP_DATA");
+    //$snmp_data = new stdClass();
     $snmp_data = [];
-    $snmp_data['profile_num'] = get_snmp_data($ip,$qos_profile_oid);
+    $mac_oid             =  '.1.3.6.1.2.1.2.2.1.6.3'; //MAC in all caps with dashes
+    $qos_profile_oid = '.1.3.6.1.4.1.17713.21.3.8.2.30.0';
+    $snmp_dn_oid = '.1.3.6.1.4.1.17713.21.3.8.4.1.1.4.1';
+    $snmp_up_oid = '.1.3.6.1.4.1.17713.21.3.8.4.1.1.5.1';
+    //error_reporting(E_ALL & ~(E_NOTICE|E_WARNING));
+    //$snmp_data->mac = strtoupper(fix_mac_addr_missing_zeroes(str_replace([' ','-'],":",trim(get_snmp_data($ip,$mac_oid)))));
+    $snmp_data['mac'] = strtoupper(fix_mac_addr_missing_zeroes(str_replace([' ','-'],":",trim(get_snmp_data($ip,$mac_oid)))));
+    $snmp_data['down']['rate'] = get_snmp_data($ip, $snmp_dn_oid);
+    $snmp_data['up']['rate'] = get_snmp_data($ip, $snmp_up_oid);
+    //$snmp_data['profile'] = get_profile(get_snmp_data($ip,$qos_profile_oid)); // gets profile number by snmp and then determines profile
+    error_reporting(E_ALL);
     $snmp_data['ovrd'] = determine_ovrd($snmp_data);
-    if (data_same($sf_data,$snmp_data)) {
-      $msg = $file_name . ": " . $sf_url . $id . " - " . $ip . " - Data is the same; no need to update";
-                                                                                        writelog("\n$msg");
-                                                                                        slack($msg, 'mattd');
-      $individual_success['successful']++;
-    } else { 
-      set_snmp_val($ip, $qos_dn_write_oid , $sf_data->sf_dn);
-      set_snmp_val($ip, $qos_up_write_oid , $sf_data->sf_up);
-      $snmp_followup_data = []; 
-      $snmp_followup_data['profile_num'] = get_snmp_data($ip,$qos_profile_oid);
-      $snmp_followup_data['ovrd'] = determine_ovrd($snmp_followup_data);
-      error_reporting(E_ALL & ~(E_NOTICE|E_WARNING));
-      if (data_same($sf_data, $snmp_followup_data)) {
-        ob_get_clean();
-                                                                                        respond('true');
-        send_reboot_cmd($ip);
-
-        sleep(110); //waiting for radio to reboot
-        $followup_ping = get_snmp_data($ip, '.1.3.6.1.2.1.1.1.0');
-        while (!$followup_ping) {
-          $followup_ping = get_snmp_data($ip, '.1.3.6.1.2.1.1.1.0'); 
-          sleep(5);
-        }
-        $snmp_followup_data = []; 
-        $snmp_followup_data['profile_num'] = get_snmp_data($ip,$qos_profile_oid);
-        $snmp_followup_data['ovrd'] = determine_ovrd($snmp_followup_data);
-        print_r($snmp_followup_data);
-        if (data_same($sf_data,$snmp_followup_data)) {
-          $individual_success['successful']++;
-        } else {
-          $msg = $file_name . ": " . $sf_url . $id . " - " . $ip . " - update failed. Data is not as intended after reboot";
-                                                                                        writelog("\n$msg");
-                                                                                        slack($msg, 'mattd');
-        }
-      } else {
-        $msg = $file_name . ": " . $sf_url . $id . " - " . $ip . " - update failed. Data is not as intended after update";
-                                                                                        writelog("\n$msg");
-                                                                                        slack($msg, 'mattd');
-      }
-      error_reporting(E_ALL);
+											heavylog("GETTING SF_DATA");
+    $sf_data->sf_dn = round($sf_data->New_MIR_Down__c * 1024);
+    $sf_data->sf_up = round($sf_data->New_MIR_Up__c * 1024);
+    $sf_data->sf_ovrd = ($sf_data->Override_Radio__c == 'true') ? 1 : 0;
+    $sf_determined_profile = epmp_get_higher_profile($sf_data->sf_dn, $sf_data->sf_up);
+    if ($sf_data->sf_ovrd) {
+      $sf_data->sf_dn = 1000000;
+      $sf_data->sf_up = 1000000;
+    } else {
+      $sf_data->sf_dn = $sf_determined_profile->dn;
+      $sf_data->sf_up = $sf_determined_profile->up;
     }
+    
+    if (data_same($sf_data, $snmp_data)) {
+      $msg = "Data is the same. No need to update";
+											writelog($msg);
+											$sf_case_comment_arr[] = sf_case_comment($id,$msg);
+      $individual_success['successful']++;
+      respond_early();
+      return 1;
+    }
+     
+      
+
+                                                                                        heavylog("REQUESTING TOKEN FROM API ");
+      $api_token_str = maestro_get_api_token(MAESTRO_CLIENT_ID, MAESTRO_CLIENT_SEC);
+                                                                                        heavylog("CREATING ARRAY FOR GET REQUEST");
+      $get_arr = ["product"];
+      $maestro_result = maestro_api_update('GET', $api_token_str, $snmp_data['mac'], $get_arr);
+                                                                                        heavylog("maestro_result => $maestro_result");
+      $decoded_maestro_result = json_decode($maestro_result);
+                                                                                        heavylog("decoded_maestro_result: ");
+                                                                                        heavylog($decoded_maestro_result);
+      if (!preg_match("+$product_type+", $decoded_maestro_result->data[0]->product)) {
+	$msg = "The product: " . $decoded_maestro_result->data[0]->product . " is not compatible with this script. Expecting $product_type product";
+											writelog("$msg");
+        return 0;
+      }
 
 
+      $put_arr = ["template" => $product_type.
+                   '__D'.str_replace(".", "_", strval($sf_data->sf_dn)).
+                   '__U'.str_replace("." ,"_", strval($sf_data->sf_up))];
+                                                                                        heavylog("put_arr: ");
+                                                                                        heavylog($put_arr);
+                                                                                        heavylog("SETTING JSON FOR API PUT");
+      $put_json = json_encode($put_arr);
 
-  }//end of for loop: ($sf_obj_arr as $sf_data)
+      $maestro_result = maestro_api_update('PUT', $api_token_str, $snmp_data['mac'], $put_json);
 
-} catch (exception $e) {
-  $catch_msg = $file_name . ": " . $sf_url . $id . " - Caught exception: $e";
-                                                                                        slack($catch_msg, 'mattd');
-  $individual_success['successful'] = 0;
-}
-                                                                                        writelog("\n\n Success: ");
-                                                                                        writelog((string) $individual_success['successful'] .
-                                                                                        " of " . (string) $individual_success['total'] . "\n");
-
-if ($individual_success['successful'] == $individual_success['total']) {
-
-} else {
-  $msg = $file_name . ": " . $sf_url . $id . " - failed";
-                                                                                        writelog($msg);
+                                                                                        heavylog("maestro_result => $maestro_result");
+      if (!$maestro_result) {
+        $msg = "$rel_path: maestro update error: $maestro_result";
+											writelog("$msg");
                                                                                         slack($msg, 'mattd');
+        return 0;
+      } else {
+        $decoded_maestro_result = json_decode($maestro_result);
+                                                                                        heavylog("decoded_maestro_result: ");
+                                                                                        heavylog($decoded_maestro_result);
+        if (($decoded_maestro_result->error) and (!empty($decoded_maestro_result->error))) { 
+          $msg = "Error reported from API: " . $decoded_maestro_result->error->message;
+											writelog("$rel_path: $sf_url/$id - $ip - $msg");  
+        } else {
+          respond_early();
+          sleep(50); //waiting for radio to reboot 
+
+                                                                                        writelog("WAITING FOR RADIO TO REBOOT...");
+                                                                                        heavylog("IGNORING NOTICE AND WARNING MESSAGES WHILE WAITING");
+          error_reporting(E_ALL & ~(E_NOTICE|E_WARNING));
+        }
+      }
+      while (!$followup_ping) {
+                                                                                        writelog(".");
+        $followup_ping = get_snmp_data($ip, '.1.3.6.1.2.1.1.1.0'); 
+        sleep(2);
+      }
+                                                                                        heavylog("DONE WAITING");
+                                                                                        heavylog("\nGETTING SNMP_FOLLOWUP_READ_DATA");
+      $snmp_followup = [];
+      error_reporting(E_ALL & ~(E_NOTICE|E_WARNING));
+      $snmp_followup['down']['rate'] = get_snmp_data($ip,$snmp_dn_oid);
+      $snmp_followup['up']['rate'] = get_snmp_data($ip,$snmp_up_oid);
+      //$snmp_followup['profile'] = get_profile(get_snmp_data($ip,$qos_profile_oid));
+      $snmp_followup['ovrd'] = determine_ovrd($snmp_followup);
+      error_reporting(E_ALL); 
+      //////////check new data against sf data and if good, callback to sf and update values
+                                                                                        heavylog("\nCHECKING IF SF_DATA AND SNMP_FOLLOWUP_READ_DATA ARE THE SAME");
+      if (data_same($sf_data,$snmp_followup)) {
+                                                                                        heavylog("\nTHEY ARE THE SAME");
+                                                                                        heavylog("\nADDING NEW RADIO MIR VALUES TO SF RADIO MIR ARRAY");
+        $sf_opp_radio_mir_arr[] = sf_1024_radio_mir($opp_id,$sf_data->sf_dn,$sf_data->sf_up,$snmp_followup['ovrd']);
+        $qos_status = ($snmp_followup['ovrd']) ? 'disabled' : 'enabled';
+                                                                                        heavylog("\nCONVERTING BPS VALUES TO MBPS");
+        $old_ssh_dn_Mbps = isset($snmp_data['down']['rate']) ? round(($snmp_data['down']['rate'] / 1024),2) : "undetermined";
+        $old_ssh_up_Mbps = isset($snmp_data['up']['rate']) ? round(($snmp_data['up']['rate'] / 1024),2) : "undetermined";
+        $new_ssh_dn_Mbps = isset($snmp_followup['down']['rate']) ? round(($snmp_followup['down']['rate'] / 1024),2) : "undetermined";
+        $new_ssh_up_Mbps = isset($snmp_followup['up']['rate']) ? round(($snmp_followup['up']['rate'] / 1024),2) : "undetermined";
+                                                                                        heavylog("\nCREATING MESSAGE TO ADD TO CASE COMMENT ARRAY");
+        $msg = "Download updated from $old_ssh_dn_Mbps to $new_ssh_dn_Mbps Mbps.\n".   
+               "Upload updated from $old_ssh_up_Mbps to $new_ssh_up_Mbps Mbps.\n".  
+               "Radio traffic shaping is $qos_status.\n".
+               "User ID: $last_mod_id";
+                                                                                        heavylog("\nADDING MESSAGE TO CASE COMMENT ARRAY");
+                                                                                        $sf_case_comment_arr[] = sf_case_comment($id,$msg);
+                                                                                        heavylog("\nINCREMENTING INDIVIDUAL SUCCESS");
+        $individual_success['successful']++;
+      } else {
+        $msg = "$rel_path: $sf_url/$id - $ip - update failed. Data is not as intended after update";
+                                                                                        writelog("\n$msg");
+                                                                                        slack($msg, 'mattd');
+                                                                                        $sf_case_comment_arr[] = sf_case_comment($id,$msg);
+      }
+//    }
+
+  } catch (exception $e) {
+    $catch_msg = "$rel_path: $sf_url/$id - $ip - Caught exception: $e";
+                                                                                        writelog("\nCAUGHT EXCEPTION");
+                                                                                        slack($catch_msg, 'mattd');
+                                                                                        $sf_case_comment_arr[] = sf_case_comment($id,$catch_msg);
+                                                                                        heavylog("\nSETTING INDIVUDUAL SUCCESS BACK TO 0");
+    $individual_success['successful'] = 0;
+  }
 }
-log_time();
-deleteOldLogs($log_dir, $keep_logs_days_old)
-
-?>
-
-
-
-
