@@ -35,11 +35,11 @@ function test_array() {
     'MapsRecords' => array(
       0 => array(
           'Id' => '5000x00000BpCfaAAF',              //Case Id
-          'Radio_Model__c' => 'Ubiquiti Rocket M5',              //Case Id
+          'Radio_Model__c' => 'Force 300',              //Case Id
           'Opportunity__c' => '0060x000008T08oAAC',
-          'SU_IP_Address__c' => '10.7.1.46',
-          'New_MIR_Down__c' => '11',
-          'New_MIR_Up__c' => '3.75',
+          'SU_IP_Address__c' => '10.10.167.122',
+          'New_MIR_Down__c' => '8',
+          'New_MIR_Up__c' => '2',
           'Override_Radio__c' => 'false',
           'LastModifiedById' => '005U0000000IucGIAS'
       ),
@@ -71,6 +71,7 @@ $sf_case_update_arr = [];
 ob_start();
 $busy = intval(check_busy());
 $times = intval(check_times());
+/*
 if ($busy) {
   if($times <= 2) {
     $times++;
@@ -90,9 +91,8 @@ if ($busy) {
   ob_flush();
   flush();
   set_busy(1);
-
 }
-
+*/
 //////////////////  DO NOT USE writelog() OR heavylog() BEFORE THIS LINE  /////////////////////
 
                                                                                         writelog(
@@ -240,15 +240,21 @@ try {
                                                                                         heavylog("\nEXECUTING do_450()");
         do_450($obj);
         break;
-      case (preg_match('/Linux [-_,A-Za-z0-9]/', $model)) :
+      case (preg_match('/Linux.*/', $model) ? true : false) :
         $sys_obj_id = get_snmp_data($ip, $sys_obj_id_oid, 1);
-        if (preg_match('/\.1\.3\.6\.1\.4\.1\.17713\./', $sys_obj_id)) {
+											heavylog("sys_obj_id: $sys_obj_id");
+        if (preg_match('/\.17713\.21\.9\.242/', $sys_obj_id)) {
           $msg = "$ip appears to be an Elevate model"; 
           $msg2 = " Please send to engineering.";
                                                                                         writelog("\n$msg");
 											$sf_case_comment_arr[] = sf_case_comment($id,$msg.$msg2);
+        } elseif (preg_match('/\.17713\.21\.9\.35/', $sys_obj_id)) {
+											heavylog("DOING ePMP Force 300 SM");
+          require_once realpath(__DIR__ . '/update_cambium_epmp_qos.php');
+          do_ePMP($obj);
         }
         break;
+
       default:
         $msg = "$ip model not recognized.";
         $msg2 = " Please send to engineering.";

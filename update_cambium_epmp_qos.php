@@ -143,7 +143,7 @@ function do_ePMP($sf_data) {
         $decoded_maestro_result = json_decode($maestro_result);
                                                                                         heavylog("decoded_maestro_result: ");
                                                                                         heavylog($decoded_maestro_result);
-        if (($decoded_maestro_result->error) and (!empty($decoded_maestro_result->error))) { 
+        if (($decoded_maestro_result->erro) and (!empty($decoded_maestro_result->error))) { 
           $msg = "Error reported from API: " . $decoded_maestro_result->error->message;
 											writelog("$rel_path: $sf_url/$id - $ip - $msg");  
         } else {
